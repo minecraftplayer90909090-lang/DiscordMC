@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "discordmc",
+  "version": "${version}",
+  "name": "Discord MC",
+  "description": "In-game Discord client for Minecraft. Works with offline accounts!",
+  "authors": ["AbhayTheMaster"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.abhaythemaster.discordmc.DiscordMC"]
+  },
+  "mixins": ["discordmc.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1"
+  }
+}

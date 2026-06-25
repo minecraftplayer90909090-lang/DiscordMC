@@ -1,0 +1,8 @@
+{
+  "required": true,
+  "package": "com.abhaythemaster.discordmc.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": ["TitleScreenMixin"],
+  "injectors": { "defaultRequire": 1 }
+}
