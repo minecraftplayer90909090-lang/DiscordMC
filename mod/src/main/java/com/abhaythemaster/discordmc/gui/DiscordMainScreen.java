@@ -2,11 +2,12 @@ package com.abhaythemaster.discordmc.gui;
 
 import com.abhaythemaster.discordmc.DiscordMC;
 import com.google.gson.JsonObject;
+import dev.isxander.yacl3.gui.YACLScreen;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,43 +15,44 @@ import java.util.List;
 public class DiscordMainScreen extends Screen {
     private final Screen parent;
 
-    // Discord colors
-    private static final int BG          = 0xFF202225;
-    private static final int SIDEBAR     = 0xFF2F3136;
-    private static final int HOVER       = 0xFF36393F;
-    private static final int ACCENT      = 0xFF5865F2;
-    private static final int GREEN       = 0xFF3BA55D;
-    private static final int TEXT        = 0xFFDCDDDE;
-    private static final int MUTED       = 0xFF8E9297;
-    private static final int WHITE       = 0xFFFFFFFF;
-    private static final int RED         = 0xFFED4245;
+    // Discord dark theme colors
+    private static final int C_BG        = 0xFF202225;
+    private static final int C_SIDEBAR   = 0xFF2F3136;
+    private static final int C_HOVER     = 0xFF36393F;
+    private static final int C_ACCENT    = 0xFF5865F2;
+    private static final int C_GREEN     = 0xFF3BA55D;
+    private static final int C_TEXT      = 0xFFDCDDDE;
+    private static final int C_MUTED     = 0xFF8E9297;
+    private static final int C_INPUT     = 0xFF40444B;
+    private static final int C_RED       = 0xFFED4245;
+    private static final int C_WHITE     = 0xFFFFFFFF;
+    private static final int C_DARK      = 0xFF1E2124;
+    private static final int C_CARD      = 0xFF34373C;
+
+    // Layout
+    private static final int GUILDBAR  = 68;
+    private static final int SIDEBAR   = 230;
+    private static final int TOPBAR    = 44;
 
     // State
-    private enum Tab { HOME, DMS, SERVERS, LOGIN }
-    private Tab currentTab = Tab.HOME;
     private List<JsonObject> dms = new ArrayList<>();
     private List<JsonObject> servers = new ArrayList<>();
-    private boolean loading = false;
+    private boolean loadingDMs = false;
     private int listScroll = 0;
-    private int hoveredItem = -1;
-
-    // Login state
-    private TextFieldWidget tokenField;
-    private String loginStatus = "";
-    private int loginStatusColor = MUTED;
-
-    // Chat state
-    private String openChannelId = null;
-    private String openChannelName = null;
+    private String openChId = null, openChName = null;
     private List<JsonObject> messages = new ArrayList<>();
-    private TextFieldWidget chatInput;
     private int chatScroll = 0;
     private boolean inChat = false;
+    private int hovDM = -1;
 
-    // Layout constants
-    private static final int GUILDBAR_W = 48;
-    private static final int SIDEBAR_W  = 200;
-    private static final int TOPBAR_H   = 48;
+    // Login
+    private boolean inLogin = false;
+    private TextFieldWidget tokenField;
+    private String loginMsg = "";
+    private int loginMsgColor = C_MUTED;
+
+    // Chat input
+    private TextFieldWidget chatInputWidget;
 
     public DiscordMainScreen(Screen parent) {
         super(Text.literal("Discord"));
@@ -60,360 +62,344 @@ public class DiscordMainScreen extends Screen {
     @Override
     protected void init() {
         if (!DiscordMC.discord.isLoggedIn()) {
-            currentTab = Tab.LOGIN;
+            inLogin = true;
             tokenField = new TextFieldWidget(textRenderer,
-                width / 2 - 150, height / 2, 300, 20, Text.literal(""));
-            tokenField.setPlaceholder(Text.literal("§8Token paste karo..."));
+                width / 2 - 140, height / 2 + 10, 280, 22, Text.literal(""));
+            tokenField.setPlaceholder(Text.literal("§8Your Discord token..."));
             tokenField.setMaxLength(200);
             addDrawableChild(tokenField);
             setInitialFocus(tokenField);
-        } else {
-            // Load DMs on init
-            if (currentTab == Tab.DMS || currentTab == Tab.HOME) {
-                loadDMs();
-            }
-            if (inChat) {
-                chatInput = new TextFieldWidget(textRenderer,
-                    GUILDBAR_W + SIDEBAR_W + 8, height - 28,
-                    width - GUILDBAR_W - SIDEBAR_W - 50, 18, Text.literal(""));
-                chatInput.setPlaceholder(Text.literal("§8Message #" + openChannelName));
-                chatInput.setMaxLength(2000);
-                addDrawableChild(chatInput);
-                setInitialFocus(chatInput);
-            }
+            return;
+        }
+
+        inLogin = false;
+
+        // Load data
+        if (dms.isEmpty() && !loadingDMs) {
+            loadingDMs = true;
+            DiscordMC.discord.fetchDMs().thenAccept(list -> { dms = list; loadingDMs = false; });
+            DiscordMC.discord.fetchGuilds().thenAccept(list -> servers = list);
+        }
+
+        // Chat input
+        if (inChat && openChId != null) {
+            chatInputWidget = new TextFieldWidget(textRenderer,
+                GUILDBAR + SIDEBAR + 16, height - 30,
+                width - GUILDBAR - SIDEBAR - 24, 20, Text.literal(""));
+            chatInputWidget.setPlaceholder(Text.literal("§8Message #" + openChName + "..."));
+            chatInputWidget.setMaxLength(2000);
+            addDrawableChild(chatInputWidget);
+            setInitialFocus(chatInputWidget);
+
+            // Real-time messages
+            DiscordMC.discord.onMessage(msg -> {
+                if (msg.get("channel_id").getAsString().equals(openChId)) {
+                    messages.add(msg);
+                    scrollToBottom();
+                }
+            });
         }
     }
 
-    private void loadDMs() {
-        loading = true;
-        dms.clear();
-        DiscordMC.discord.fetchDMs().thenAccept(list -> {
-            dms = list;
-            loading = false;
-        });
-    }
-
-    private void loadServers() {
-        loading = true;
-        servers.clear();
-        DiscordMC.discord.fetchGuilds().thenAccept(list -> {
-            servers = list;
-            loading = false;
-        });
-    }
-
-    private void openChat(String channelId, String channelName) {
-        openChannelId = channelId;
-        openChannelName = channelName;
-        inChat = true;
-        messages.clear();
-        chatScroll = 0;
-        DiscordMC.discord.fetchMessages(channelId).thenAccept(msgs -> {
-            messages = msgs;
-            chatScroll = Math.max(0, messages.size() * 20 - (height - TOPBAR_H - 40));
-        });
-        DiscordMC.discord.onMessage(msg -> {
-            if (openChannelId != null && msg.get("channel_id").getAsString().equals(openChannelId)) {
-                messages.add(msg);
-                chatScroll = Math.max(0, messages.size() * 20 - (height - TOPBAR_H - 40));
-            }
-        });
-        clearAndInit();
+    private void scrollToBottom() {
+        chatScroll = Math.max(0, messages.size() * 38 - (height - TOPBAR - 50));
     }
 
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
-        // Full background
-        ctx.fill(0, 0, width, height, BG);
+        // Base background
+        ctx.fill(0, 0, width, height, C_BG);
 
-        if (!DiscordMC.discord.isLoggedIn()) {
-            renderLoginScreen(ctx, mx, my);
-            super.render(ctx, mx, my, delta);
-            return;
-        }
+        if (inLogin) { renderLogin(ctx, mx, my); super.render(ctx, mx, my, delta); return; }
 
-        // ── Guild/Server icon bar (left column) ──────────────────────────────
         renderGuildBar(ctx, mx, my);
-
-        // ── Sidebar ───────────────────────────────────────────────────────────
         renderSidebar(ctx, mx, my);
-
-        // ── Main content area ─────────────────────────────────────────────────
-        int contentX = GUILDBAR_W + SIDEBAR_W;
-        int contentW = width - contentX;
-
-        // Top bar
-        ctx.fill(contentX, 0, width, TOPBAR_H, SIDEBAR);
-        ctx.fill(contentX, TOPBAR_H - 1, width, TOPBAR_H, 0xFF1E2124);
-
-        if (inChat && openChannelName != null) {
-            // Channel header
-            ctx.fill(contentX + 8, 16, contentX + 12, 32, ACCENT);
-            ctx.drawTextWithShadow(textRenderer,
-                Text.literal("§f# " + openChannelName), contentX + 20, 19, TEXT);
-            // Back button area
-            ctx.fill(contentX + 2, 12, contentX + 8, 36, 0);
-            renderChatArea(ctx, contentX, contentW, mx, my);
-        } else {
-            ctx.drawTextWithShadow(textRenderer,
-                Text.literal("§f" + getTabTitle()), contentX + 16, 18, TEXT);
-            renderContentArea(ctx, contentX, contentW, mx, my);
-        }
+        renderMainArea(ctx, mx, my);
 
         super.render(ctx, mx, my, delta);
     }
 
-    private void renderLoginScreen(DrawContext ctx, int mx, int my) {
-        // Center panel
-        int pw = 340, ph = 200;
-        int px = width / 2 - pw / 2, py = height / 2 - ph / 2;
+    // ── Login Screen ──────────────────────────────────────────────────────────
 
-        ctx.fill(px, py, px + pw, py + ph, SIDEBAR);
-        ctx.fill(px, py, px + pw, py + 3, ACCENT);
+    private void renderLogin(DrawContext ctx, int mx, int my) {
+        int pw = 360, ph = 220;
+        int px = width / 2 - pw / 2, py = height / 2 - ph / 2 - 20;
 
-        // Discord logo box
-        ctx.fill(width / 2 - 20, py + 16, width / 2 + 20, py + 56, ACCENT);
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("§fD"), width / 2, py + 30, WHITE);
+        // Panel
+        ctx.fill(px, py, px + pw, py + ph, C_SIDEBAR);
+        // Top accent bar
+        ctx.fill(px, py, px + pw, py + 3, C_ACCENT);
+
+        // Discord icon
+        int ix = width / 2 - 24, iy = py + 14;
+        ctx.fill(ix, iy, ix + 48, iy + 48, C_ACCENT);
+        // D letter
+        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("§f§lD"), width / 2, iy + 17, C_WHITE);
 
         ctx.drawCenteredTextWithShadow(textRenderer,
-            Text.literal("§f§lWelcome back!"), width / 2, py + 64, WHITE);
+            Text.literal("§f§lWelcome back!"), width / 2, py + 72, C_WHITE);
         ctx.drawCenteredTextWithShadow(textRenderer,
-            Text.literal("§7Login with your Discord token"), width / 2, py + 76, MUTED);
+            Text.literal("§7Enter your Discord token to continue"), width / 2, py + 85, C_MUTED);
 
-        // Token field label
+        // Token label
         ctx.drawTextWithShadow(textRenderer,
-            Text.literal("§8TOKEN"), px + 20, py + 96, MUTED);
+            Text.literal("§7TOKEN"), px + 20, py + 106, C_MUTED);
 
-        // Token field bg
-        ctx.fill(px + 16, py + 108, px + pw - 16, py + 132, BG);
+        // Token input bg
+        ctx.fill(px + 16, py + 118, px + pw - 16, py + 144, C_INPUT);
 
-        if (!loginStatus.isEmpty())
+        // Status message
+        if (!loginMsg.isEmpty())
             ctx.drawCenteredTextWithShadow(textRenderer,
-                Text.literal(loginStatus), width / 2, py + 140, loginStatusColor);
+                Text.literal(loginMsg), width / 2, py + 150, loginMsgColor);
 
         // Login button
-        boolean hovBtn = mx >= width / 2 - 60 && mx <= width / 2 + 60
-                      && my >= py + 152 && my <= py + 172;
-        ctx.fill(width / 2 - 60, py + 152, width / 2 + 60, py + 172,
-            hovBtn ? 0xFF4752C4 : ACCENT);
+        int bx = width / 2 - 70, by = py + 162;
+        boolean hovLogin = mx >= bx && mx <= bx + 140 && my >= by && my <= by + 24;
+        ctx.fill(bx, by, bx + 140, by + 24, hovLogin ? 0xFF4752C4 : C_ACCENT);
         ctx.drawCenteredTextWithShadow(textRenderer,
-            Text.literal("§fLogin"), width / 2, py + 158, WHITE);
+            Text.literal("§f§lLogin"), width / 2, by + 8, C_WHITE);
 
         // Back
+        boolean hovBack = mx >= width / 2 - 40 && mx <= width / 2 + 40 && my >= py + ph - 20 && my <= py + ph - 4;
         ctx.drawCenteredTextWithShadow(textRenderer,
-            Text.literal("§7← Back to Minecraft"), width / 2, py + ph - 12, MUTED);
+            Text.literal(hovBack ? "§f← Back" : "§8← Back"), width / 2, py + ph - 18, hovBack ? C_TEXT : C_MUTED);
     }
+
+    // ── Guild Bar (leftmost column) ───────────────────────────────────────────
 
     private void renderGuildBar(DrawContext ctx, int mx, int my) {
-        ctx.fill(0, 0, GUILDBAR_W, height, 0xFF1E2124);
+        ctx.fill(0, 0, GUILDBAR, height, C_DARK);
 
-        // Home button
-        boolean homeHov = mx >= 8 && mx <= 40 && my >= 8 && my <= 40;
-        ctx.fill(8, 8, 40, 40, homeHov || currentTab == Tab.HOME || currentTab == Tab.DMS ? ACCENT : SIDEBAR);
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("§f⌂"), 24, 18, WHITE);
+        // Home/DMs button
+        int hov = (mx >= 10 && mx <= 58 && my >= 10 && my <= 50) ? 1 : 0;
+        ctx.fill(10, 10, 58, 50, hov == 1 || !inChat ? C_ACCENT : C_SIDEBAR);
+        // Home icon
+        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("§f⌂"), 34, 24, C_WHITE);
+        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("§8DMs"), 34, 36, C_MUTED);
 
-        // Separator
-        ctx.fill(12, 46, 36, 48, MUTED);
+        // Divider
+        ctx.fill(14, 56, 54, 58, C_MUTED);
 
         // Server icons
-        if (!servers.isEmpty()) {
-            int sy = 54;
-            for (int i = 0; i < Math.min(servers.size(), 8); i++) {
-                JsonObject s = servers.get(i);
-                boolean hov = mx >= 8 && mx <= 40 && my >= sy && my <= sy + 32;
-                ctx.fill(8, sy, 40, sy + 32, hov ? ACCENT : HOVER);
-                String name = s.get("name").getAsString();
-                String abbr = name.replaceAll("[^A-Za-z0-9]", "").substring(0, Math.min(2, name.replaceAll("[^A-Za-z0-9]", "").length())).toUpperCase();
-                if (abbr.isEmpty()) abbr = "S";
-                ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("§f" + abbr), 24, sy + 10, WHITE);
-                sy += 36;
-            }
+        int sy = 64;
+        for (int i = 0; i < Math.min(servers.size(), 7); i++) {
+            JsonObject s = servers.get(i);
+            boolean sh = mx >= 10 && mx <= 58 && my >= sy && my <= sy + 40;
+            ctx.fill(10, sy, 58, sy + 40, sh ? C_ACCENT : C_HOVER);
+            String name = s.get("name").getAsString();
+            String abbr = getAbbr(name);
+            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("§f" + abbr), 34, sy + 14, C_WHITE);
+            sy += 46;
         }
     }
+
+    // ── Sidebar (DM List) ─────────────────────────────────────────────────────
 
     private void renderSidebar(DrawContext ctx, int mx, int my) {
-        ctx.fill(GUILDBAR_W, 0, GUILDBAR_W + SIDEBAR_W, height, SIDEBAR);
+        ctx.fill(GUILDBAR, 0, GUILDBAR + SIDEBAR, height, C_SIDEBAR);
 
-        // User avatar + name at bottom
-        ctx.fill(GUILDBAR_W, height - 52, GUILDBAR_W + SIDEBAR_W, height, 0xFF292B2F);
-        if (DiscordMC.discord.getSelfUser() != null) {
-            String uname = DiscordMC.discord.getSelfUser().get("username").getAsString();
-            ctx.fill(GUILDBAR_W + 8, height - 44, GUILDBAR_W + 40, height - 12, ACCENT);
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("§f" + uname.substring(0, Math.min(2, uname.length())).toUpperCase()),
-                GUILDBAR_W + 24, height - 34, WHITE);
-            ctx.drawTextWithShadow(textRenderer,
-                Text.literal("§f" + uname), GUILDBAR_W + 48, height - 38, TEXT);
-            ctx.drawTextWithShadow(textRenderer,
-                Text.literal("§a● Online"), GUILDBAR_W + 48, height - 26, GREEN);
-        }
-
-        // Tab headers
+        // Search bar at top
+        ctx.fill(GUILDBAR + 8, 8, GUILDBAR + SIDEBAR - 8, 34, C_INPUT);
         ctx.drawTextWithShadow(textRenderer,
-            Text.literal("§8DIRECT MESSAGES"),
-            GUILDBAR_W + 12, 16, MUTED);
+            Text.literal("§8Find or start a conversation"), GUILDBAR + 14, 16, C_MUTED);
 
-        // DM list
-        if (loading) {
+        // Section header
+        ctx.drawTextWithShadow(textRenderer,
+            Text.literal("§8DIRECT MESSAGES"), GUILDBAR + 10, 44, C_MUTED);
+
+        // DM entries
+        int y = 60 - listScroll;
+        for (int i = 0; i < dms.size(); i++) {
+            if (y + 40 < 60 || y > height - 56) { y += 44; continue; }
+            JsonObject dm = dms.get(i);
+            String name = getDMName(dm);
+            boolean active = inChat && dm.get("id").getAsString().equals(openChId);
+            boolean hov = mx >= GUILDBAR + 4 && mx <= GUILDBAR + SIDEBAR - 4
+                       && my >= y && my <= y + 40;
+
+            // Row bg
+            ctx.fill(GUILDBAR + 4, y, GUILDBAR + SIDEBAR - 4, y + 40,
+                active ? C_HOVER : (hov ? C_CARD : 0));
+
+            // Avatar circle
+            int ax = GUILDBAR + 14, ay = y + 8;
+            ctx.fill(ax, ay, ax + 24, ay + 24, C_ACCENT);
+            // Initial letter
             ctx.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("§7Loading..."), GUILDBAR_W + SIDEBAR_W / 2, 80, MUTED);
-        } else {
-            int y = 36 - listScroll;
-            for (int i = 0; i < dms.size(); i++) {
-                JsonObject dm = dms.get(i);
-                if (y > 28 && y < height - 56) {
-                    String name = getDMName(dm);
-                    boolean hov = mx >= GUILDBAR_W + 4 && mx <= GUILDBAR_W + SIDEBAR_W - 4
-                               && my >= y && my <= y + 34;
-                    boolean active = inChat && openChannelId != null
-                                  && openChannelId.equals(dm.get("id").getAsString());
+                Text.literal("§f§l" + name.substring(0, 1).toUpperCase()),
+                ax + 12, ay + 8, C_WHITE);
 
-                    ctx.fill(GUILDBAR_W + 4, y, GUILDBAR_W + SIDEBAR_W - 4, y + 32,
-                        active ? HOVER : (hov ? 0xFF34373C : 0));
+            // Online dot
+            ctx.fill(ax + 17, ay + 17, ax + 24, ay + 24, C_GREEN);
 
-                    // Avatar circle
-                    ctx.fill(GUILDBAR_W + 10, y + 6, GUILDBAR_W + 28, y + 26, ACCENT);
-                    ctx.drawCenteredTextWithShadow(textRenderer,
-                        Text.literal("§f" + name.substring(0, Math.min(1, name.length())).toUpperCase()),
-                        GUILDBAR_W + 19, y + 11, WHITE);
+            // Name
+            ctx.drawTextWithShadow(textRenderer,
+                Text.literal("§f" + truncate(name, 20)), GUILDBAR + 44, y + 10, active || hov ? C_WHITE : C_TEXT);
+            ctx.drawTextWithShadow(textRenderer,
+                Text.literal("§8Click to open"), GUILDBAR + 44, y + 22, C_MUTED);
 
-                    ctx.drawTextWithShadow(textRenderer,
-                        Text.literal("§f" + (name.length() > 18 ? name.substring(0, 18) + ".." : name)),
-                        GUILDBAR_W + 34, y + 11, hov || active ? TEXT : MUTED);
-                }
-                y += 36;
-            }
+            y += 44;
         }
+
+        if (loadingDMs)
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                Text.literal("§7Loading..."), GUILDBAR + SIDEBAR / 2, 100, C_MUTED);
+
+        // User panel at bottom
+        renderUserPanel(ctx);
     }
 
-    private void renderContentArea(DrawContext ctx, int contentX, int contentW, int mx, int my) {
-        ctx.fill(contentX, TOPBAR_H, width, height, BG);
+    private void renderUserPanel(DrawContext ctx) {
+        ctx.fill(GUILDBAR, height - 56, GUILDBAR + SIDEBAR, height, 0xFF292B2F);
+
+        if (DiscordMC.discord.getSelfUser() == null) return;
+        String uname = DiscordMC.discord.getSelfUser().get("username").getAsString();
+
+        // Avatar
+        ctx.fill(GUILDBAR + 8, height - 48, GUILDBAR + 40, height - 16, C_ACCENT);
         ctx.drawCenteredTextWithShadow(textRenderer,
-            Text.literal("§7Select a DM from the left"), contentX + contentW / 2, height / 2, MUTED);
+            Text.literal("§f§l" + uname.substring(0, 1).toUpperCase()),
+            GUILDBAR + 24, height - 36, C_WHITE);
+        // Online dot on avatar
+        ctx.fill(GUILDBAR + 30, height - 24, GUILDBAR + 40, height - 16, C_GREEN);
+
+        // Name + status
+        ctx.drawTextWithShadow(textRenderer,
+            Text.literal("§f§l" + truncate(uname, 16)), GUILDBAR + 48, height - 44, C_WHITE);
+        ctx.drawTextWithShadow(textRenderer,
+            Text.literal("§aOnline"), GUILDBAR + 48, height - 30, C_GREEN);
     }
 
-    private void renderChatArea(DrawContext ctx, int contentX, int contentW, int mx, int my) {
-        ctx.fill(contentX, TOPBAR_H, width, height, BG);
+    // ── Main Content Area ─────────────────────────────────────────────────────
 
-        // Messages
-        int msgY = TOPBAR_H + 8 - chatScroll;
-        for (JsonObject msg : messages) {
-            if (msgY > TOPBAR_H && msgY < height - 40) {
+    private void renderMainArea(DrawContext ctx, int mx, int my) {
+        int cx = GUILDBAR + SIDEBAR;
+        int cw = width - cx;
+
+        // Top bar
+        ctx.fill(cx, 0, width, TOPBAR, C_SIDEBAR);
+        ctx.fill(cx, TOPBAR, width, TOPBAR + 1, C_DARK);
+
+        if (!inChat) {
+            // Empty state
+            ctx.fill(cx, TOPBAR, width, height, C_BG);
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                Text.literal("§f§lNo DM selected"), cx + cw / 2, height / 2 - 10, C_TEXT);
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                Text.literal("§7Choose a conversation from the left!"), cx + cw / 2, height / 2 + 6, C_MUTED);
+
+            // Header
+            ctx.drawTextWithShadow(textRenderer,
+                Text.literal("§f§lDirect Messages"), cx + 14, 14, C_WHITE);
+            return;
+        }
+
+        // Chat header
+        ctx.fill(cx, 0, width, TOPBAR, C_SIDEBAR);
+        ctx.fill(cx + 6, 14, cx + 10, 30, C_ACCENT);
+        ctx.drawTextWithShadow(textRenderer,
+            Text.literal("§f§l# " + openChName), cx + 16, 14, C_WHITE);
+
+        // Back hint
+        ctx.drawTextWithShadow(textRenderer,
+            Text.literal("§8[ESC to go back]"), width - 90, 16, C_MUTED);
+
+        // Messages area
+        ctx.fill(cx, TOPBAR, width, height - 40, C_BG);
+
+        if (messages.isEmpty()) {
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                Text.literal("§7No messages yet..."), cx + cw / 2, height / 2, C_MUTED);
+        } else {
+            int y = TOPBAR + 8 - chatScroll;
+            for (JsonObject msg : messages) {
+                if (y + 38 < TOPBAR || y > height - 40) { y += 38; continue; }
+
                 String author = "Unknown";
                 if (msg.has("author"))
                     author = msg.getAsJsonObject("author").get("username").getAsString();
                 String content = msg.has("content") ? msg.get("content").getAsString() : "";
 
                 // Avatar
-                ctx.fill(contentX + 8, msgY, contentX + 24, msgY + 16, ACCENT);
+                ctx.fill(cx + 8, y + 2, cx + 30, y + 24, C_ACCENT);
                 ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("§f" + author.substring(0, Math.min(1, author.length())).toUpperCase()),
-                    contentX + 16, msgY + 3, WHITE);
+                    Text.literal("§f" + author.substring(0, 1).toUpperCase()),
+                    cx + 19, y + 9, C_WHITE);
 
-                // Username
+                // Author name
                 ctx.drawTextWithShadow(textRenderer,
-                    Text.literal("§f§l" + author), contentX + 30, msgY, TEXT);
+                    Text.literal("§f§l" + author), cx + 36, y + 2, C_ACCENT);
 
-                // Content (wrap long text)
-                if (content.length() > 70) {
+                // Message content (wrap at 60 chars)
+                if (content.length() <= 65) {
                     ctx.drawTextWithShadow(textRenderer,
-                        Text.literal("§7" + content.substring(0, 70)), contentX + 30, msgY + 10, TEXT);
-                    ctx.drawTextWithShadow(textRenderer,
-                        Text.literal("§7" + content.substring(70, Math.min(140, content.length()))),
-                        contentX + 30, msgY + 20, TEXT);
+                        Text.literal("§f" + content), cx + 36, y + 14, C_TEXT);
                 } else {
                     ctx.drawTextWithShadow(textRenderer,
-                        Text.literal("§7" + content), contentX + 30, msgY + 10, TEXT);
+                        Text.literal("§f" + content.substring(0, 65)), cx + 36, y + 14, C_TEXT);
+                    ctx.drawTextWithShadow(textRenderer,
+                        Text.literal("§f" + content.substring(65, Math.min(130, content.length()))),
+                        cx + 36, y + 24, C_TEXT);
                 }
+
+                y += 38;
             }
-            msgY += 32;
         }
 
-        // Chat input bar
-        ctx.fill(contentX, height - 40, width, height, SIDEBAR);
-        ctx.fill(contentX + 8, height - 32, width - 8, height - 8, 0xFF40444B);
+        // Input bar background
+        ctx.fill(cx, height - 40, width, height, C_SIDEBAR);
+        ctx.fill(cx + 8, height - 32, width - 8, height - 8, C_INPUT);
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
     private String getDMName(JsonObject dm) {
-        if (dm.has("recipients") && dm.getAsJsonArray("recipients").size() > 0)
-            return dm.getAsJsonArray("recipients").get(0).getAsJsonObject().get("username").getAsString();
+        try {
+            if (dm.has("recipients") && dm.getAsJsonArray("recipients").size() > 0)
+                return dm.getAsJsonArray("recipients").get(0).getAsJsonObject().get("username").getAsString();
+        } catch (Exception ignored) {}
         return "Unknown";
     }
 
-    private String getTabTitle() {
-        return switch (currentTab) {
-            case DMS -> "Direct Messages";
-            case SERVERS -> "Servers";
-            default -> "Discord";
-        };
+    private String getAbbr(String name) {
+        StringBuilder sb = new StringBuilder();
+        for (String w : name.split("[ _-]")) if (!w.isEmpty()) { sb.append(w.charAt(0)); if (sb.length() >= 2) break; }
+        return sb.length() > 0 ? sb.toString().toUpperCase() : "?";
     }
+
+    private String truncate(String s, int max) {
+        return s.length() > max ? s.substring(0, max - 2) + ".." : s;
+    }
+
+    // ── Mouse & Keyboard ──────────────────────────────────────────────────────
 
     @Override
     public boolean mouseClicked(double mx, double my, int btn) {
-        if (!DiscordMC.discord.isLoggedIn()) {
+        if (inLogin) {
+            int py = height / 2 - 130;
             // Login button
-            int py = height / 2 - 100;
-            if (mx >= width / 2 - 60 && mx <= width / 2 + 60 && my >= py + 152 && my <= py + 172) {
-                String t = tokenField != null ? tokenField.getText().trim() : "";
-                if (!t.isEmpty()) {
-                    loginStatus = "§7Connecting...";
-                    loginStatusColor = MUTED;
-                    DiscordMC.discord.loginWithToken(t).thenAccept(ok -> {
-                        if (ok) {
-                            client.execute(() -> {
-                                currentTab = Tab.HOME;
-                                inChat = false;
-                                clearAndInit();
-                                loadDMs();
-                                loadServers();
-                            });
-                        } else {
-                            loginStatus = "§cInvalid token!";
-                            loginStatusColor = RED;
-                        }
-                    });
-                }
-                return true;
+            if (mx >= width / 2 - 70 && mx <= width / 2 + 70 && my >= py + 162 && my <= py + 186) {
+                doLogin(); return true;
             }
             // Back
-            if (my >= height / 2 + 86 && my <= height / 2 + 100) {
-                client.setScreen(parent); return true;
-            }
+            if (my >= py + 202) { client.setScreen(parent); return true; }
             return super.mouseClicked(mx, my, btn);
         }
 
         // Home button
-        if (mx >= 8 && mx <= 40 && my >= 8 && my <= 40) {
-            currentTab = Tab.HOME;
-            inChat = false;
-            clearAndInit();
-            loadDMs();
-            return true;
+        if (mx >= 10 && mx <= 58 && my >= 10 && my <= 50) {
+            inChat = false; openChId = null; clearAndInit(); return true;
         }
 
-        // Server icons in guild bar
-        if (!servers.isEmpty() && mx >= 8 && mx <= 40) {
-            int sy = 54;
-            for (JsonObject s : servers) {
-                if (my >= sy && my <= sy + 32) {
-                    currentTab = Tab.SERVERS;
-                    inChat = false;
-                    clearAndInit();
-                    return true;
-                }
-                sy += 36;
-            }
-        }
-
-        // DM list clicks
-        if (mx >= GUILDBAR_W + 4 && mx <= GUILDBAR_W + SIDEBAR_W - 4) {
-            int y = 36 - listScroll;
+        // DM clicks
+        if (mx >= GUILDBAR + 4 && mx <= GUILDBAR + SIDEBAR - 4) {
+            int y = 60 - listScroll;
             for (JsonObject dm : dms) {
-                if (my >= y && my <= y + 32) {
-                    openChat(dm.get("id").getAsString(), getDMName(dm));
-                    return true;
+                if (my >= y && my <= y + 40) {
+                    openChat(dm.get("id").getAsString(), getDMName(dm)); return true;
                 }
-                y += 36;
+                y += 44;
             }
         }
 
@@ -422,39 +408,50 @@ public class DiscordMainScreen extends Screen {
 
     @Override
     public boolean keyPressed(int key, int scan, int mod) {
-        // Enter to send message
-        if ((key == 257 || key == 335) && inChat && chatInput != null) {
-            String txt = chatInput.getText().trim();
-            if (!txt.isEmpty()) {
-                DiscordMC.discord.sendMessage(openChannelId, txt);
-                chatInput.setText("");
+        if (key == 257 || key == 335) { // Enter
+            if (inLogin) { doLogin(); return true; }
+            if (inChat && chatInputWidget != null) {
+                String txt = chatInputWidget.getText().trim();
+                if (!txt.isEmpty()) {
+                    DiscordMC.discord.sendMessage(openChId, txt);
+                    chatInputWidget.setText("");
+                }
+                return true;
             }
-            return true;
         }
-        // Escape
-        if (key == 256) {
-            if (inChat) {
-                inChat = false;
-                openChannelId = null;
-                clearAndInit();
-            } else {
-                client.setScreen(parent);
-            }
-            return true;
+        if (key == 256) { // ESC
+            if (inChat) { inChat = false; openChId = null; clearAndInit(); return true; }
+            client.setScreen(parent); return true;
         }
         return super.keyPressed(key, scan, mod);
     }
 
     @Override
     public boolean mouseScrolled(double mx, double my, double h, double v) {
-        if (mx < GUILDBAR_W + SIDEBAR_W) {
-            listScroll = Math.max(0, listScroll - (int)(v * 8));
-        } else if (inChat) {
-            chatScroll = Math.max(0, chatScroll - (int)(v * 8));
-        }
+        if (mx < GUILDBAR + SIDEBAR) listScroll = Math.max(0, listScroll - (int)(v * 10));
+        else if (inChat) chatScroll = Math.max(0, chatScroll - (int)(v * 10));
         return true;
     }
 
-    @Override
-    public boolean shouldPause() { return false; }
+    private void doLogin() {
+        if (tokenField == null) return;
+        String t = tokenField.getText().trim();
+        if (t.isEmpty()) { loginMsg = "§cToken cannot be empty!"; loginMsgColor = C_RED; return; }
+        loginMsg = "§7Connecting to Discord..."; loginMsgColor = C_MUTED;
+        DiscordMC.discord.loginWithToken(t).thenAccept(ok -> client.execute(() -> {
+            if (ok) { inLogin = false; clearAndInit(); }
+            else { loginMsg = "§cInvalid token! Please try again."; loginMsgColor = C_RED; }
+        }));
+    }
+
+    private void openChat(String chId, String chName) {
+        openChId = chId; openChName = chName; inChat = true;
+        messages.clear(); chatScroll = 0;
+        DiscordMC.discord.fetchMessages(chId).thenAccept(msgs -> {
+            messages = msgs; scrollToBottom();
+        });
+        clearAndInit();
+    }
+
+    @Override public boolean shouldPause() { return false; }
 }
