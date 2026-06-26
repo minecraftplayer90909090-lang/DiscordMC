@@ -9,6 +9,7 @@ repositories {
     maven { url 'https://maven.fabricmc.net/' }
     maven { url 'https://maven.isxander.dev/releases' }
     maven { url 'https://maven.terraformersmc.com/releases' }
+    maven { url 'https://maven.isxander.dev/snapshots' }
 }
 
 dependencies {
@@ -16,9 +17,7 @@ dependencies {
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-
-    // YACL3
-    modImplementation "dev.isxander:yet-another-config-lib:3.5.0+1.21.1-fabric"
+    modImplementation "dev.isxander:yet-another-config-lib:3.6.2+1.21.1-fabric"
 }
 
 processResources {
