@@ -3,6 +3,6 @@
   "package": "com.abhaythemaster.discordmc.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [],
-  "client": ["TitleScreenMixin"],
+  "client": ["TitleScreenMixin", "GameMenuMixin"],
   "injectors": { "defaultRequire": 1 }
 }
