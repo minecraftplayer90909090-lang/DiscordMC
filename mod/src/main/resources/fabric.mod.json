@@ -3,7 +3,7 @@
   "id": "discordmc",
   "version": "${version}",
   "name": "Discord MC",
-  "description": "In-game Discord client for Minecraft. Works with offline accounts!",
+  "description": "In-game Discord client with glassmorphic UI",
   "authors": ["AbhayTheMaster"],
   "license": "MIT",
   "environment": "client",
@@ -15,6 +15,6 @@
     "fabricloader": ">=0.16.0",
     "fabric-api": "*",
     "minecraft": "~1.21.1",
-    "yet_another_config_lib_v3": "*"
+    "owo": ">=0.12.15"
   }
 }
