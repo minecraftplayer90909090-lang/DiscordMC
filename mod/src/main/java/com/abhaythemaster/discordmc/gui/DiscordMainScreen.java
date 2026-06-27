@@ -295,7 +295,7 @@ public class DiscordMainScreen extends Screen {
     private void renderSidebar(DrawContext ctx, int mx, int my, int sOff, float pulse) {
         int sx = sOff + GW;
         // Glass layers
-        ctx.fill(sx, 0, sx+SW, height, 0xFF07091200);
+        ctx.fill(sx, 0, sx+SW, height, 0xFF070912);
         ctx.fill(sx, 0, sx+SW, height, G_L1);
         ctx.fill(sx, 0, sx+SW, height, G_L2);
         ctx.fill(sx, 0, sx+SW, height, G_L3);
